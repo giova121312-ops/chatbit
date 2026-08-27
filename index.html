@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chatbit</title>
+    
+    <!-- Meta-tag per Web App ultra semplice (senza Manifest / Service Worker) -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="application-name" content="Chatbit">
+
+    <!-- Icona per la Schermata Home del telefono -->
+    <link rel="icon" sizes="192x192" href="/Chatbit icona.png">
+    <link rel="apple-touch-icon" href="/Chatbit icona.png">
+
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
+        body { background-color: #111b21; color: #e9edef; height: 100vh; display: flex; align-items: center; justify-content: center; }
+        
+        /* Auth Screen */
+        #auth-screen { background: #222e35; padding: 30px; border-radius: 8px; text-align: center; width: 300px; }
+        #auth-screen input { width: 100%; padding: 10px; margin-bottom: 10px; background: #111b21; border: 1px solid #2a3942; color: #fff; border-radius: 4px; }
+        .btn { padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin: 2px; }
+        .btn-green { background: #00a884; color: #111b21; }
+        .btn-dark { background: #2a3942; color: #00a884; }
+        .btn-danger { background: #ea868f; color: #111b21; }
+
+        /* Chat Screen */
+        #chat-app { display: none; width: 100vw; height: 100vh; }
+        .container { display: flex; width: 100%; height: 100%; }
+        .sidebar { width: 30%; background: #111b21; border-right: 1px solid #222e35; display: flex; flex-direction: column; }
+        
+        .sidebar-header { height: 60px; background: #202c33; display: flex; align-items: center; justify-content: space-between; padding: 0 15px; font-weight: bold; }
+        
+        /* Stile per posizionare il nome e il tasto logout affiancati */
+        .user-info-area { display: flex; align-items: center; gap: 8px; }
+
+        .header-actions { display: flex; align-items: center; gap: 10px; }
+        .icon-btn { background: none; border: none; color: #00a884; font-size: 18px; cursor: pointer; padding: 5px; border-radius: 50%; }
+        .icon-btn:hover { background: #2a3942; }
+
+        .search-area { padding: 10px; background: #111b21; border-bottom: 1px solid #222e35; display: flex; gap: 5px; }
+        .search-area input { flex: 1; background: #2a3942; border: none; color: #fff; padding: 8px; border-radius: 4px; outline: none; }
+        .search-area button { background: #00a884; border: none; padding: 0 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+
+        .contacts { flex: 1; overflow-y: auto; }
+        .contact { padding: 15px; border-bottom: 1px solid #222e35; cursor: pointer; display: flex; align-items: center; justify-content: space-between; }
+        .contact:hover, .contact.active { background: #2a3942; }
+        .contact-info { display: flex; align-items: center; gap: 8px; }
+        .delete-btn { color: #ea868f; background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; border-radius: 4px; }
+        .delete-btn:hover { background: rgba(234, 134, 143, 0.2); }
+
+        .section-title { padding: 10px 15px 5px; font-size: 12px; color: #8696a0; text-transform: uppercase; font-weight: bold; }
+
+        .main-chat { flex: 1; background: #0b141a; display: flex; flex-direction: column; }
+        
+        /* Chat Header */
+        .chat-header { height: 60px; background: #202c33; display: flex; align-items: center; justify-content: space-between; padding: 0 15px; font-weight: bold; }
+        .chat-header-info { display: flex; align-items: center; gap: 8px; }
+        .chat-header-actions { display: flex; align-items: center; gap: 10px; }
+        
+        /* Pallino di Stato Online / Offline */
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: none; /* nascosto di default finché non si seleziona una chat */
+            flex-shrink: 0;
+        }
+        .status-dot.online { background-color: #00a884; display: inline-block; }
+        .status-dot.offline { background-color: #ea868f; display: inline-block; }
+
+        .header-call-btn {
+            background: #2a3942;
+            border: none;
+            color: #00a884;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 16px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .header-call-btn:hover { background: #00a884; color: #111b21; }
+
+        .add-file-btn, .add-member-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: none;
+            background: #2a3942;
+            color: #00a884;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+        .add-file-btn { margin-left: 8px; } /* Sposta il pallino con la più un po' più avanti */
+        .add-file-btn:hover, .add-member-btn:hover { background: #00a884; color: #111b21; }
+
+        .messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .msg { max-width: 60%; padding: 8px 12px; border-radius: 8px; font-size: 14px; word-break: break-word; }
+        .msg-sender { font-weight: bold; font-size: 11px; color: #00a884; margin-bottom: 2px; }
+        .sent { align-self: flex-end; background: #005c4b; }
+        .received { align-self: flex-start; background: #202c33; }
+        .uploading-msg { align-self: flex-end; background: #1f353d; border: 1px dashed #00a884; color: #8696a0; }
+        .time { font-size: 10px; color: #8696a0; text-align: right; margin-top: 4px; }
+        
+        /* Input Area */
+        .input-area { height: 60px; background: #202c33; display: flex; align-items: center; padding: 10px; gap: 8px; }
+        .input-area input { flex: 1; background: #2a3942; border: none; color: #fff; padding: 0 15px; height: 40px; border-radius: 8px; outline: none; }
+        
+        .input-area .action-btn { 
+            width: 40px; 
+            height: 40px; 
+            border-radius: 50%; 
+            border: none; 
+            background: #00a884; 
+            color: #111b21; 
+            cursor: pointer; 
+            font-size: 16px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            flex-shrink: 0;
+            user-select: none;
+        }
+        .input-area .mic-btn { background: #2a3942; color: #00a884; }
+        .input-area .mic-btn.recording { background: #ea868f; color: #111b21; animation: pulse 1s infinite alternate; }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            100% { transform: scale(1.1); }
+        }
+
+        audio { max-width: 220px; height: 36px; margin-top: 4px; }
+        .file-link { display: inline-block; margin-top: 5px; color: #00a884; text-decoration: underline; font-weight: bold; }
+
+        /* Modal Generici */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.85);
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+        }
+        .modal-box {
+            background: #222e35;
+            padding: 25px;
+            border-radius: 8px;
+            text-align: center;
+            max-width: 350px;
+            width: 90%;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+        .modal-box h3 { color: #00a884; margin-bottom: 15px; }
+        .modal-box p { margin-bottom: 20px; font-size: 15px; }
+        .modal-box input { width: 100%; padding: 10px; background: #111b21; border: 1px solid #2a3942; color: #fff; border-radius: 4px; margin-bottom: 15px; }
+        .modal-buttons { display: flex; justify-content: center; gap: 10px; }
+        .checkbox-list { text-align: left; max-height: 150px; overflow-y: auto; margin-bottom: 15px; }
+        .checkbox-item { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+
+        /* CHIAMATA OVERLAY */
+        #call-screen {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: #0b141a;
+            z-index: 1000;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .video-container {
+            position: relative;
+            width: 90%;
+            max-width: 800px;
+            height: 70vh;
+            background: #111b21;
+            border-radius: 12px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #remote-video { width: 100%; height: 100%; object-fit: cover; }
+        #local-video {
+            position: absolute;
+            bottom: 20px; right: 20px;
+            width: 150px; height: 110px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 2px solid #00a884;
+            background: #222e35;
+        }
+        .call-controls { margin-top: 20px; display: flex; gap: 20px; }
+        .call-btn-round {
+            width: 60px; height: 60px;
+            border-radius: 50%; border: none;
+            font-size: 24px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+    </style>
+</head>
+<body>
+
+    <input type="file" id="file-selector" style="display: none;" onchange="handleFileSelect(event)">
+
+    <!-- Login -->
+    <div id="auth-screen">
+        <h2 style="color:#00a884; margin-bottom: 15px;">Chatbit</h2>
+        <input type="text" id="username" placeholder="Nome utente">
+        <input type="password" id="password" placeholder="Password">
+        <div>
+            <button class="btn btn-green" onclick="auth('login')">Accedi</button>
+            <button class="btn btn-dark" onclick="auth('register')">Registrati</button>
+        </div>
+    </div>
+
+    <!-- Chat App -->
+    <div id="chat-app">
+        <div class="container">
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <!-- Nome Utente e Tasto Logout Affiancati -->
+                    <div class="user-info-area">
+                        <span id="my-name">Mio Nome</span>
+                        <button class="icon-btn" onclick="logout()" title="Esci dall'account">🚪</button>
+                    </div>
+                    <div class="header-actions">
+                        <button class="icon-btn" onclick="openCreateGroupModal()" title="Crea Gruppo">👥</button>
+                    </div>
+                </div>
+                <div class="search-area">
+                    <input type="text" id="search-input" placeholder="Cerca amico da invitare...">
+                    <button onclick="sendInvite()">Invita</button>
+                </div>
+                <div class="contacts" id="contacts-list"></div>
+            </div>
+            <div class="main-chat">
+                <div class="chat-header">
+                    <div class="chat-header-info">
+                        <span id="chat-title">Seleziona un amico o un gruppo per chattare</span>
+                        <span id="status-dot" class="status-dot"></span>
+                        <button class="add-file-btn" id="add-file-btn" onclick="openFilePicker()" title="Condividi un file">+</button>
+                        <button class="add-member-btn" id="add-member-btn" onclick="openAddMemberModal()" title="Aggiungi partecipanti al gruppo">+👤</button>
+                    </div>
+                    <div class="chat-header-actions">
+                        <button class="header-call-btn" id="audio-call-btn" onclick="startCall(false)" title="Chiamata Audio">📞</button>
+                        <button class="header-call-btn" id="video-call-btn" onclick="startCall(true)" title="Videochiamata">📹</button>
+                    </div>
+                </div>
+                <div class="messages" id="messages-list"></div>
+                <div class="input-area" id="input-area" style="display: none;">
+                    <input type="text" id="msg-input" placeholder="Scrivi un messaggio..." onkeypress="if(event.key==='Enter') send()">
+                    <button class="action-btn" onclick="send()" title="Invia">➤</button>
+                    <button class="action-btn mic-btn" id="mic-btn" onclick="toggleRecording()" title="Registra Vocale">🎤</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schermata Chiamata in corso -->
+    <div id="call-screen">
+        <h3 id="call-status" style="color: #00a884; margin-bottom: 15px;">Chiamata in corso...</h3>
+        <div class="video-container">
+            <video id="remote-video" autoplay playsinline></video>
+            <video id="local-video" autoplay playsinline muted></video>
+        </div>
+        <div class="call-controls">
+            <button class="call-btn-round btn-danger" onclick="endCall()" title="Chiudi Chiamata">📞</button>
+        </div>
+    </div>
+
+    <!-- Modal Chiamata in Arrivo -->
+    <div class="modal-overlay" id="incoming-call-modal">
+        <div class="modal-box">
+            <h3 id="incoming-call-title">Chiamata in arrivo</h3>
+            <p id="incoming-call-text">Qualcuno ti sta chiamando...</p>
+            <div class="modal-buttons">
+                <button class="btn btn-green" onclick="acceptCall()">Rispondi</button>
+                <button class="btn btn-danger" onclick="rejectCall()">Rifiuta</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Notifica Invito -->
+    <div class="modal-overlay" id="invite-modal">
+        <div class="modal-box">
+            <h3>Nuova Richiesta!</h3>
+            <p id="modal-text">Qualcuno ti ha inviato una richiesta.</p>
+            <div class="modal-buttons">
+                <button class="btn btn-green" onclick="respondInvite(true)">Accetta</button>
+                <button class="btn btn-danger" onclick="respondInvite(false)">Rifiuta</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Crea Gruppo -->
+    <div class="modal-overlay" id="create-group-modal">
+        <div class="modal-box">
+            <h3>Crea Nuovo Gruppo</h3>
+            <input type="text" id="group-name-input" placeholder="Nome del gruppo">
+            <p style="text-align:left; font-size:12px; color:#8696a0; margin-bottom:5px;">Seleziona i partecipanti:</p>
+            <div class="checkbox-list" id="group-friends-checklist"></div>
+            <div class="modal-buttons">
+                <button class="btn btn-green" onclick="submitCreateGroup()">Crea</button>
+                <button class="btn btn-dark" onclick="closeModal('create-group-modal')">Annulla</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Aggiungi Partecipanti -->
+    <div class="modal-overlay" id="add-member-modal">
+        <div class="modal-box">
+            <h3>Aggiungi al Gruppo</h3>
+            <p style="text-align:left; font-size:12px; color:#8696a0; margin-bottom:5px;">Seleziona amici da aggiungere:</p>
+            <div class="checkbox-list" id="add-member-checklist"></div>
+            <div class="modal-buttons">
+                <button class="btn btn-green" onclick="submitAddMembers()">Aggiungi</button>
+                <button class="btn btn-dark" onclick="closeModal('add-member-modal')">Annulla</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let socket, currentUser = '', activeTarget = '', isCurrentGroup = false, pendingInviteFrom = '';
+        let availableFriends = [], currentGroupMembers = [];
+        let mediaRecorder = null, audioChunks = [], isRecording = false, currentStream = null;
+
+        /* WEBRTC VARIABLES */
+        let peerConnection = null;
+        let localMediaStream = null;
+        let incomingCallData = null;
+        let callTargetUser = '';
+
+        const rtcConfig = {
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        };
+
+        /* AUTO-LOGIN ALL'AVVIO DELLA PAGINA */
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedUser = localStorage.getItem('chat_user');
+            const savedPass = localStorage.getItem('chat_pass');
+
+            if (savedUser && savedPass) {
+                fetch('/api/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: savedUser, password: savedPass })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        currentUser = savedUser;
+                        startApp();
+                    } else {
+                        localStorage.removeItem('chat_user');
+                        localStorage.removeItem('chat_pass');
+                    }
+                })
+                .catch(() => console.log("Errore nella verifica dell'auto-login"));
+            }
+        });
+
+        async function auth(type) {
+            const u = document.getElementById('username').value.trim();
+            const p = document.getElementById('password').value.trim();
+            if(!u || !p) return alert("Inserisci nome e password");
+
+            const res = await fetch('/api/' + type, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username: u, password: p})
+            });
+            const data = await res.json();
+
+            if(res.ok) {
+                localStorage.setItem('chat_user', u);
+                localStorage.setItem('chat_pass', p);
+
+                if(type === 'register') {
+                    alert("Registrato con successo!");
+                    currentUser = u;
+                    startApp();
+                } else {
+                    currentUser = u;
+                    startApp();
+                }
+            } else {
+                alert(data.message);
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('chat_user');
+            localStorage.removeItem('chat_pass');
+            location.reload();
+        }
+
+        function updateStatusDot(isOnline) {
+            const dot = document.getElementById('status-dot');
+            if (!dot) return;
+            if (isCurrentGroup || !activeTarget) {
+                dot.style.display = 'none';
+            } else {
+                dot.className = 'status-dot ' + (isOnline ? 'online' : 'offline');
+            }
+        }
+
+        function checkTargetStatus(targetUser) {
+            if (!targetUser || isCurrentGroup) {
+                updateStatusDot(false);
+                return;
+            }
+            fetch('/api/user_status?username=' + encodeURIComponent(targetUser))
+                .then(res => res.json())
+                .then(data => {
+                    if (activeTarget === targetUser && !isCurrentGroup) {
+                        updateStatusDot(data.online);
+                    }
+                })
+                .catch(() => updateStatusDot(false));
+        }
+
+        function startApp() {
+            document.getElementById('auth-screen').style.display = 'none';
+            document.getElementById('chat-app').style.display = 'block';
+            document.getElementById('my-name').innerText = currentUser;
+
+            socket = io();
+            socket.emit('register_user', {username: currentUser});
+
+            socket.on('user_status_changed', data => {
+                if (!isCurrentGroup && activeTarget === data.username) {
+                    updateStatusDot(data.online);
+                }
+            });
+
+            socket.on('receive_invite_modal', data => {
+                pendingInviteFrom = data.from;
+                document.getElementById('modal-text').innerText = `${data.from} ti ha invitato ad essere suo amico su Chatbit!`;
+                document.getElementById('invite-modal').style.display = 'flex';
+            });
+
+            socket.on('invite_response', data => { alert(data.message); });
+            socket.on('update_contacts', () => { loadContacts(); });
+
+            socket.on('receive_message', msg => {
+                if((msg.isGroup && isCurrentGroup && msg.receiver === activeTarget) ||
+                   (!msg.isGroup && !isCurrentGroup && (msg.sender === activeTarget || msg.sender === currentUser))) {
+                    addMsg(msg);
+                }
+            });
+
+            /* EVENTI WEBRTC */
+            socket.on('incoming_call', data => {
+                incomingCallData = data;
+                document.getElementById('incoming-call-title').innerText = data.isVideo ? "📹 Videochiamata in arrivo" : "📞 Chiamata in arrivo";
+                document.getElementById('incoming-call-text').innerText = `${data.from} ti sta chiamando...`;
+                document.getElementById('incoming-call-modal').style.display = 'flex';
+            });
+
+            socket.on('call_accepted', async data => {
+                document.getElementById('call-status').innerText = "In chiamata con " + callTargetUser;
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+            });
+
+            socket.on('ice_candidate', async data => {
+                if (peerConnection && data.candidate) {
+                    try {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                    } catch (e) { console.error("Errore ICE candidate:", e); }
+                }
+            });
+
+            socket.on('call_rejected', data => {
+                alert(data.reason || "Chiamata rifiutata o fallita.");
+                closeCallUI();
+            });
+
+            socket.on('call_ended', () => {
+                alert("La chiamata è terminata.");
+                closeCallUI();
+            });
+
+            loadContacts();
+        }
+
+        /* LOGICA CHIAMATE WEBRTC */
+        async function startCall(isVideo) {
+            if(!activeTarget || isCurrentGroup) return alert("Seleziona una chat singola per chiamare.");
+            callTargetUser = activeTarget;
+
+            document.getElementById('call-screen').style.display = 'flex';
+            document.getElementById('call-status').innerText = `Chiamando ${callTargetUser}...`;
+
+            try {
+                localMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
+                document.getElementById('local-video').srcObject = localMediaStream;
+
+                createPeerConnection();
+
+                localMediaStream.getTracks().forEach(track => peerConnection.addTrack(track, localMediaStream));
+
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+
+                socket.emit('call_user', {
+                    from: currentUser,
+                    target: callTargetUser,
+                    offer: offer,
+                    isVideo: isVideo
+                });
+            } catch (err) {
+                alert("Impossibile accedere a fotocamera/microfono.");
+                closeCallUI();
+            }
+        }
+
+        async function acceptCall() {
+            document.getElementById('incoming-call-modal').style.display = 'none';
+            callTargetUser = incomingCallData.from;
+
+            document.getElementById('call-screen').style.display = 'flex';
+            document.getElementById('call-status').innerText = "In chiamata con " + callTargetUser;
+
+            try {
+                localMediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: true,
+                    video: incomingCallData.isVideo
+                });
+                document.getElementById('local-video').srcObject = localMediaStream;
+
+                createPeerConnection();
+
+                localMediaStream.getTracks().forEach(track => peerConnection.addTrack(track, localMediaStream));
+
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+
+                socket.emit('answer_call', {
+                    target: callTargetUser,
+                    answer: answer
+                });
+            } catch (err) {
+                alert("Impossibile accedere ai dispositivi multimediali.");
+                closeCallUI();
+            }
+        }
+
+        function rejectCall() {
+            document.getElementById('incoming-call-modal').style.display = 'none';
+            if (incomingCallData) {
+                socket.emit('end_call', { target: incomingCallData.from });
+                incomingCallData = null;
+            }
+        }
+
+        function createPeerConnection() {
+            peerConnection = new RTCPeerConnection(rtcConfig);
+
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                    socket.emit('ice_candidate', {
+                        target: callTargetUser,
+                        candidate: event.candidate
+                    });
+                }
+            };
+
+            peerConnection.ontrack = event => {
+                document.getElementById('remote-video').srcObject = event.streams[0];
+            };
+        }
+
+        function endCall() {
+            if (callTargetUser) {
+                socket.emit('end_call', { target: callTargetUser });
+            }
+            closeCallUI();
+        }
+
+        function closeCallUI() {
+            document.getElementById('call-screen').style.display = 'none';
+            if (localMediaStream) {
+                localMediaStream.getTracks().forEach(track => track.stop());
+                localMediaStream = null;
+            }
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            callTargetUser = '';
+            document.getElementById('remote-video').srcObject = null;
+            document.getElementById('local-video').srcObject = null;
+        }
+
+        function sendInvite() {
+            const friendInput = document.getElementById('search-input');
+            const targetUser = friendInput.value.trim();
+            if(!targetUser) return alert("Inserisci il nome dell'utente da cercare.");
+            socket.emit('send_invite', { sender: currentUser, receiver: targetUser });
+            friendInput.value = '';
+        }
+
+        function respondInvite(accepted) {
+            document.getElementById('invite-modal').style.display = 'none';
+            socket.emit('respond_invite', { sender: pendingInviteFrom, receiver: currentUser, accepted: accepted });
+        }
+
+        function removeFriend(friendName, event) {
+            event.stopPropagation();
+            if(confirm(`Sei sicuro di voler eliminare l'amicizia con ${friendName}?`)) {
+                socket.emit('remove_friend', { user: currentUser, friend: friendName });
+                if(activeTarget === friendName && !isCurrentGroup) resetChat();
+            }
+        }
+
+        function leaveGroup(groupId, groupName, event) {
+            event.stopPropagation();
+            if(confirm(`Sei sicuro di voler uscire dal gruppo "${groupName}"?`)) {
+                socket.emit('leave_group', { user: currentUser, groupId: groupId });
+                if(activeTarget === groupId && isCurrentGroup) resetChat();
+            }
+        }
+
+        function resetChat() {
+            activeTarget = '';
+            document.getElementById('chat-title').innerText = "Seleziona un amico o un gruppo per chattare";
+            document.getElementById('status-dot').style.display = 'none';
+            document.getElementById('input-area').style.display = 'none';
+            document.getElementById('add-file-btn').style.display = 'none';
+            document.getElementById('add-member-btn').style.display = 'none';
+            document.getElementById('audio-call-btn').style.display = 'none';
+            document.getElementById('video-call-btn').style.display = 'none';
+            document.getElementById('messages-list').innerHTML = '';
+        }
+
+        async function loadContacts() {
+            const res = await fetch('/api/contacts?username=' + currentUser);
+            const data = await res.json();
+            availableFriends = data.contacts;
+
+            const list = document.getElementById('contacts-list');
+            list.innerHTML = '';
+            
+            // Sezione Gruppi
+            if(data.groups && data.groups.length > 0) {
+                const titleG = document.createElement('div');
+                titleG.className = 'section-title';
+                titleG.innerText = 'Gruppi';
+                list.appendChild(titleG);
+
+                data.groups.forEach(g => {
+                    const div = document.createElement('div');
+                    div.className = 'contact ' + (isCurrentGroup && g.id === activeTarget ? 'active' : '');
+                    div.innerHTML = `
+                        <div class="contact-info">👥 <b>${g.name}</b></div>
+                        <button class="delete-btn" onclick="leaveGroup('${g.id}', '${g.name}', event)" title="Esci dal gruppo">🗑️</button>
+                    `;
+                    div.onclick = () => selectGroup(g);
+                    list.appendChild(div);
+                });
+            }
+
+            // Sezione Amici
+            const titleA = document.createElement('div');
+            titleA.className = 'section-title';
+            titleA.innerText = 'Amici';
+            list.appendChild(titleA);
+
+            if(data.contacts.length === 0) {
+                list.innerHTML += '<div style="padding:10px 15px; color:#8696a0; font-size:13px;">Nessun amico. Cercali in alto!</div>';
+            } else {
+                data.contacts.forEach(c => {
+                    const div = document.createElement('div');
+                    div.className = 'contact ' + (!isCurrentGroup && c === activeTarget ? 'active' : '');
+                    div.innerHTML = `
+                        <div class="contact-info">👤 ${c}</div>
+                        <button class="delete-btn" onclick="removeFriend('${c}', event)" title="Elimina Amicizia">🗑️</button>
+                    `;
+                    div.onclick = () => selectContact(c);
+                    list.appendChild(div);
+                });
+            }
+        }
+
+        async function selectContact(c) {
+            activeTarget = c;
+            isCurrentGroup = false;
+            document.getElementById('chat-title').innerText = c;
+            checkTargetStatus(c);
+            document.getElementById('add-file-btn').style.display = 'flex';
+            document.getElementById('add-member-btn').style.display = 'none';
+            document.getElementById('audio-call-btn').style.display = 'flex';
+            document.getElementById('video-call-btn').style.display = 'flex';
+            document.getElementById('input-area').style.display = 'flex';
+            loadContacts();
+            
+            const res = await fetch(`/api/messages?user1=${currentUser}&target=${c}&isGroup=false`);
+            const data = await res.json();
+            document.getElementById('messages-list').innerHTML = '';
+            data.messages.forEach(addMsg);
+        }
+
+        async function selectGroup(g) {
+            activeTarget = g.id;
+            isCurrentGroup = true;
+            currentGroupMembers = g.members;
+            document.getElementById('chat-title').innerText = "👥 " + g.name;
+            document.getElementById('status-dot').style.display = 'none';
+            document.getElementById('add-file-btn').style.display = 'flex';
+            document.getElementById('add-member-btn').style.display = 'flex';
+            document.getElementById('audio-call-btn').style.display = 'none';
+            document.getElementById('video-call-btn').style.display = 'none';
+            document.getElementById('input-area').style.display = 'flex';
+            loadContacts();
+
+            const res = await fetch(`/api/messages?user1=${currentUser}&target=${g.id}&isGroup=true`);
+            const data = await res.json();
+            document.getElementById('messages-list').innerHTML = '';
+            data.messages.forEach(addMsg);
+        }
+
+        function addMsg(m) {
+            const list = document.getElementById('messages-list');
+            const div = document.createElement('div');
+            const isMe = m.sender === currentUser;
+            div.className = 'msg ' + (isMe ? 'sent' : 'received');
+
+            let senderHtml = (!isMe && isCurrentGroup) ? `<div class="msg-sender">${m.sender}</div>` : '';
+
+            if (m.isAudio && m.audioUrl) {
+                div.innerHTML = `${senderHtml}<div>🎙️ <b>Nota vocale</b></div><audio controls src="${m.audioUrl}"></audio><div class="time">${m.time}</div>`;
+            } else if (m.isFile && m.fileUrl) {
+                div.innerHTML = `${senderHtml}<div>📄 <b>File condiviso</b></div><a class="file-link" href="${m.fileUrl}" download="${m.fileName}">${m.fileName}</a><div class="time">${m.time}</div>`;
+            } else {
+                div.innerHTML = `${senderHtml}<div>${m.text}</div><div class="time">${m.time}</div>`;
+            }
+
+            list.appendChild(div);
+            list.scrollTop = list.scrollHeight;
+        }
+
+        function send() {
+            const input = document.getElementById('msg-input');
+            if(!input.value.trim() || !activeTarget) return;
+            const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            socket.emit('send_message', {
+                sender: currentUser,
+                receiver: activeTarget,
+                isGroup: isCurrentGroup,
+                text: input.value,
+                isAudio: false,
+                isFile: false,
+                time: time
+            });
+            input.value = '';
+        }
+
+        /* MODAL GRUPPI */
+        function openCreateGroupModal() {
+            const listContainer = document.getElementById('group-friends-checklist');
+            listContainer.innerHTML = '';
+            if(availableFriends.length === 0) {
+                listContainer.innerHTML = '<div style="font-size:12px; color:#8696a0;">Devi prima avere degli amici!</div>';
+            } else {
+                availableFriends.forEach(f => {
+                    listContainer.innerHTML += `
+                        <div class="checkbox-item">
+                            <input type="checkbox" value="${f}" class="create-group-cb" id="cb-${f}">
+                            <label for="cb-${f}">${f}</label>
+                        </div>
+                    `;
+                });
+            }
+            document.getElementById('create-group-modal').style.display = 'flex';
+        }
+
+        function submitCreateGroup() {
+            const groupName = document.getElementById('group-name-input').value.trim();
+            if(!groupName) return alert("Inserisci un nome per il gruppo!");
+
+            const selectedMembers = Array.from(document.querySelectorAll('.create-group-cb:checked')).map(cb => cb.value);
+            socket.emit('create_group', { creator: currentUser, groupName: groupName, members: selectedMembers });
+
+            document.getElementById('group-name-input').value = '';
+            closeModal('create-group-modal');
+        }
+
+        function openAddMemberModal() {
+            const listContainer = document.getElementById('add-member-checklist');
+            listContainer.innerHTML = '';
+            
+            const nonMembers = availableFriends.filter(f => !currentGroupMembers.includes(f));
+            if(nonMembers.length === 0) {
+                listContainer.innerHTML = '<div style="font-size:12px; color:#8696a0;">Tutti i tuoi amici sono già nel gruppo.</div>';
+            } else {
+                nonMembers.forEach(f => {
+                    listContainer.innerHTML += `
+                        <div class="checkbox-item">
+                            <input type="checkbox" value="${f}" class="add-member-cb" id="cb-add-${f}">
+                            <label for="cb-add-${f}">${f}</label>
+                        </div>
+                    `;
+                });
+            }
+            document.getElementById('add-member-modal').style.display = 'flex';
+        }
+
+        function submitAddMembers() {
+            const selectedMembers = Array.from(document.querySelectorAll('.add-member-cb:checked')).map(cb => cb.value);
+            if(selectedMembers.length === 0) return alert("Seleziona almeno un amico da aggiungere.");
+
+            socket.emit('add_members_to_group', { groupId: activeTarget, newMembers: selectedMembers });
+            closeModal('add-member-modal');
+        }
+
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+        /* INVIO FILE CON BARRA DI AVANZAMENTO (%) */
+        function openFilePicker() {
+            if (!activeTarget) return alert("Seleziona prima una chat.");
+            document.getElementById('file-selector').click();
+        }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const target = activeTarget;
+            const targetIsGroup = isCurrentGroup;
+
+            const list = document.getElementById('messages-list');
+            const tempDiv = document.createElement('div');
+            tempDiv.className = 'msg uploading-msg';
+            tempDiv.innerHTML = `<div>⏳ Invio di <b>${file.name}</b>... <span class="upload-percent">0%</span></div>`;
+            list.appendChild(tempDiv);
+            list.scrollTop = list.scrollHeight;
+
+            const percentSpan = tempDiv.querySelector('.upload-percent');
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/upload', true);
+
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    percentSpan.innerText = `${percent}%`;
+                }
+            };
+
+            xhr.onload = () => {
+                if (tempDiv.parentNode) {
+                    tempDiv.parentNode.removeChild(tempDiv);
+                }
+
+                if (xhr.status === 200) {
+                    const response = JSON.parse(xhr.responseText);
+                    const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+                    socket.emit('send_message', {
+                        sender: currentUser,
+                        receiver: target,
+                        isGroup: targetIsGroup,
+                        isFile: true,
+                        fileUrl: response.fileUrl,
+                        fileName: response.fileName,
+                        time: time
+                    });
+                } else {
+                    alert("Errore durante il caricamento del file.");
+                }
+                event.target.value = '';
+            };
+
+            xhr.onerror = () => {
+                if (tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
+                alert("Errore di connessione durante l'invio del file.");
+                event.target.value = '';
+            };
+
+            xhr.send(formData);
+        }
+
+        /* REGISTRAZIONE VOCALE */
+        async function toggleRecording() {
+            const micBtn = document.getElementById('mic-btn');
+            if (!activeTarget) return alert("Seleziona prima una chat.");
+
+            if (!isRecording) {
+                try {
+                    currentStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    audioChunks = [];
+                    mediaRecorder = new MediaRecorder(currentStream);
+
+                    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+                    mediaRecorder.onstop = () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        const reader = new FileReader();
+                        reader.readAsDataURL(audioBlob);
+                        reader.onloadend = () => {
+                            const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                            socket.emit('send_message', {
+                                sender: currentUser,
+                                receiver: activeTarget,
+                                isGroup: isCurrentGroup,
+                                isAudio: true,
+                                audioUrl: reader.result,
+                                time: time
+                            });
+                        };
+                        if (currentStream) currentStream.getTracks().forEach(track => track.stop());
+                    };
+
+                    mediaRecorder.start();
+                    isRecording = true;
+                    micBtn.classList.add('recording');
+                } catch (err) {
+                    alert("Impossibile accedere al microfono.");
+                }
+            } else {
+                if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+                isRecording = false;
+                micBtn.classList.remove('recording');
+            }
+        }
+    </script>
+</body>
+</html>

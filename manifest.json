@@ -1,0 +1,23 @@
+{
+  "short_name": "Chatbit",
+  "name": "Chatbit Application",
+  "icons": [
+    {
+      "src": "/Chatbit icona.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/Chatbit icona.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#ffffff",
+  "theme_color": "#007bff",
+  "display": "standalone",
+  "orientation": "any"
+}
